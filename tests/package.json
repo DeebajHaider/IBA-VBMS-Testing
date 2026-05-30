@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test:unit":        "npx --no-install jest --config unit/jest.config.js",
+    "test:unit": "npx --no-install jest --config unit/jest.config.js",
     "test:integration": "npx --no-install jest --config integration/jest.config.js --runInBand",
-    "test:e2e":         "npx --no-install playwright test --config playwright.config.ts",
-    "test:e2e:ui":      "npx --no-install playwright test --config playwright.config.ts --ui",
-    "test:all":         "npm run test:unit && npm run test:integration && npm run test:e2e"
+    "test:e2e": "npx --no-install playwright test --config playwright.config.ts",
+    "test:e2e:ui": "npx --no-install playwright test --config playwright.config.ts --ui",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.4.0",
@@ -17,6 +17,7 @@
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/testing": "^11.1.24",
+    "@playwright/test": "^1.60.0",
     "@supabase/supabase-js": "^2.106.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^30.0.0",

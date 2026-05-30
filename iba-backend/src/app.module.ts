@@ -12,7 +12,10 @@ import { TimeSlotsModule }     from './time-slots/time-slots.module';
 @Module({
   imports: [
     // Load .env file globally
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: process.env.NODE_ENV === 'test' ? '.env.test' : '.env',
+    }),
     SupabaseModule,
     AuthModule,
     UsersModule,
