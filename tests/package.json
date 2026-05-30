@@ -1,0 +1,35 @@
+{
+  "name": "iba-vbms-tests",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test:unit": "jest --config unit/jest.config.js",
+    "test:integration": "jest --config integration/jest.config.js --runInBand",
+    "test:e2e": "playwright test --config playwright.config.ts",
+    "test:e2e:ui": "playwright test --config playwright.config.ts --ui",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^10.4.0",
+    "@nestjs/common": "^11.1.24",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.1.24",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/testing": "^11.1.24",
+    "@supabase/supabase-js": "^2.106.2",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jest": "^30.0.0",
+    "@types/supertest": "^7.2.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "jest": "^30.4.2",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.11",
+    "typescript": "^6.0.3"
+  }
+}
