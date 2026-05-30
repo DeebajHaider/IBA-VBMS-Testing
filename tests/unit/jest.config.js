@@ -10,6 +10,11 @@ module.exports = {
   },
   moduleNameMapper: {
     '^src/(.*)$': '<rootDir>/../iba-backend/src/$1',
+    '^@nestjs/(.*)$': '<rootDir>/../iba-backend/node_modules/@nestjs/$1',
+    '^reflect-metadata$': '<rootDir>/../iba-backend/node_modules/reflect-metadata',
   },
-  setupFiles: ['reflect-metadata'],
+  setupFiles: [
+    '<rootDir>/../iba-backend/node_modules/reflect-metadata/Reflect.js',
+  ],
 };
+
