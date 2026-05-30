@@ -2,16 +2,17 @@ module.exports = {
   displayName: 'integration',
   testEnvironment: 'node',
   rootDir: '../',
-  testMatch: ['<rootDir>/tests/integration/**/*.spec.ts'],
+  testMatch: ['<rootDir>/integration/**/*.spec.ts'],
   transform: {
     '^.+\\.ts$': ['ts-jest', {
-      tsconfig: 'tests/tsconfig.json',
+      tsconfig: '<rootDir>/tsconfig.json',
     }],
   },
   moduleNameMapper: {
-    '^src/(.*)$': '<rootDir>/iba-backend/src/$1',
+    '^src/(.*)$': '<rootDir>/../iba-backend/src/$1',
   },
   setupFiles: ['reflect-metadata'],
   testTimeout: 30000,
-  globalSetup: '<rootDir>/tests/integration/helpers/globalSetup.ts',
+  globalSetup: '<rootDir>/integration/helpers/globalSetup.ts',
 };
+
