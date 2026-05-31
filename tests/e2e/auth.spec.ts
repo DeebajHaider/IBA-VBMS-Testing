@@ -59,5 +59,44 @@ test.describe('Auth E2E', () => {
     await expect(page.getByLabel('ERP / Username')).toBeVisible();
   });
 
+  test('E2E-AUTH-004: unauthenticated user sees login form (fresh context has no localStorage)', async ({ page }) => {
+    // Playwright gives each test a fresh browser context with empty localStorage by default.
+    // App.jsx calls getStoredUser() on mount — returns null — so LoginPage renders.
+    await page.goto(BASE);
+
+    await expect(page.getByLabel('ERP / Username')).toBeVisible();
+    await expect(page.getByLabel('Password')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible();
+
+    // The authenticated header must NOT be present
+    await expect(page.getByText('IBA Facility Booking')).not.toBeVisible();
+  });
+
+  test('E2E-AUTH-007: after logout, localStorage is cleared and login form reappears', async ({ page }) => {
+    await page.goto(BASE);
+
+    await page.getByLabel('ERP / Username').fill('12345');
+    await page.getByLabel('Password').fill('student123');
+    await page.getByRole('button', { name: 'Sign In' }).click();
+    await expect(page.getByText('IBA Facility Booking')).toBeVisible();
+
+    // Confirm token is in localStorage before logout
+    const tokenBefore = await page.evaluate(() => localStorage.getItem('iba_token'));
+    expect(tokenBefore).not.toBeNull();
+
+    await page.getByRole('button', { name: 'Logout' }).click();
+
+    // Login form must reappear
+    await expect(page.getByLabel('ERP / Username')).toBeVisible();
+
+    // The real security assertion: localStorage must be empty after logout.
+    // Even if the user navigated back somehow, getStoredUser() returns null
+    // and App renders LoginPage because there's nothing in localStorage.
+    const tokenAfter = await page.evaluate(() => localStorage.getItem('iba_token'));
+    const userAfter  = await page.evaluate(() => localStorage.getItem('iba_user'));
+    expect(tokenAfter).toBeNull();
+    expect(userAfter).toBeNull();
+  });
+
 });
 
