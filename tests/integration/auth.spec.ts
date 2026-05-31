@@ -126,5 +126,28 @@ describe('Auth API', () => {
 
     expect(forgedRes.status).toBe(401);
   });
+
+  it('API-AUTH-LOGIN-VALIDATION: missing/empty fields → 400 with field-level errors', async () => {
+    const emptyRes = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({});
+    expect(emptyRes.status).toBe(400);
+    expect(Array.isArray(emptyRes.body.message)).toBe(true);
+
+    const missingPwRes = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ erp: '12345' });
+    expect(missingPwRes.status).toBe(400);
+    // message is a flat string array — join and search rather than mapping over objects
+    expect(missingPwRes.body.message.join(' ')).toContain('password');
+
+    const emptyStrRes = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ erp: '', password: '' });
+    expect(emptyStrRes.status).toBe(400);
+    const joined = emptyStrRes.body.message.join(' ');
+    expect(joined).toContain('erp');
+    expect(joined).toContain('password');
+  });
 });
 
