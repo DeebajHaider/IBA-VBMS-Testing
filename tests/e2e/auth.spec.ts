@@ -1,42 +1,63 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('E2E-AUTH-001: Authentication', () => {
+const BASE = 'http://localhost:5173';
 
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(() => {
-      localStorage.removeItem('iba_token');
-      localStorage.removeItem('iba_user');
-    });
-    await page.reload();
+test.describe('Auth E2E', () => {
+
+  test('E2E-AUTH-001: student logs in and sees the student dashboard', async ({ page }) => {
+    await page.goto(BASE);
+
+    // The login form should be the first thing visible
+    await expect(page.getByLabel('ERP / Username')).toBeVisible();
+
+    await page.getByLabel('ERP / Username').fill('12345');
+    await page.getByLabel('Password').fill('student123');
+    await page.getByRole('button', { name: 'Sign In' }).click();
+
+    // After login, App.jsx renders the header with this h1 — always present for any role
+    await expect(page.getByText('IBA Facility Booking')).toBeVisible();
+
+    // The user's name and role appear in the header pill — confirms the right user logged in
+    await expect(page.getByText('(student)')).toBeVisible();
+
+    // Logout button is always present when authenticated
+    await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
   });
 
-  test('student can log in and sees the student dashboard', async ({ page }) => {
-    await page.goto('/');
+  test('E2E-AUTH-002: PO logs in and sees booking management UI with filter controls', async ({ page }) => {
+    await page.goto(BASE);
 
-    await expect(page.getByLabel(/ERP/i)).toBeVisible();
+    await page.getByLabel('ERP / Username').fill('po001');
+    await page.getByLabel('Password').fill('po123');
+    await page.getByRole('button', { name: 'Sign In' }).click();
 
-    await page.getByLabel(/ERP/i).fill('12345');
-    await page.getByLabel(/password/i).fill('student123');
-    await page.getByRole('button', { name: /sign in/i }).click();
+    // The PO dashboard always renders this h2 regardless of data
+    await expect(page.getByText('Booking Requests Management')).toBeVisible();
 
-    // Logout button appears on ALL dashboards the moment login succeeds
-    await expect(page.getByRole('button', { name: /logout|sign out/i })).toBeVisible();
-
-    // Verify it's specifically the student dashboard, not admin or PO
-    // (student dashboard has a booking form with these fields)
-    await expect(page.getByText(/student/i).first()).toBeVisible();
+    // The filter buttons (Pending/Approved/Rejected/All) are always rendered
+    // — these confirm the PO-specific UI loaded, not the student or admin dashboard
+    await expect(page.getByRole('button', { name: 'Pending' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approved' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Rejected' })).toBeVisible();
   });
 
-  test('wrong password shows error and stays on login page', async ({ page }) => {
-    await page.goto('/');
+  test('E2E-AUTH-003: wrong credentials show error message on login page', async ({ page }) => {
+    await page.goto(BASE);
 
-    await page.getByLabel(/ERP/i).fill('12345');
-    await page.getByLabel(/password/i).fill('definitelywrong');
-    await page.getByRole('button', { name: /sign in/i }).click();
+    await page.getByLabel('ERP / Username').fill('12345');
+    await page.getByLabel('Password').fill('definitelywrong');
+    await page.getByRole('button', { name: 'Sign In' }).click();
 
-    await expect(page.getByText(/invalid credentials/i)).toBeVisible();
-    await expect(page.getByLabel(/ERP/i)).toBeVisible();
+    // The error div appears when login fails — locating by CSS class since it has no role
+    const errorDiv = page.locator('.alert-error');
+    await expect(errorDiv).toBeVisible();
+
+    // The message comes from the backend's UnauthorizedException
+    await expect(errorDiv).toContainText('Invalid credentials');
+
+    // We must still be on the login page — the login form inputs should still be present
+    await expect(page.getByLabel('ERP / Username')).toBeVisible();
   });
 
 });
+
