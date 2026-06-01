@@ -7,7 +7,12 @@
     "test:integration": "npx --no-install jest --config integration/jest.config.js --runInBand",
     "test:e2e": "npx --no-install playwright test --config playwright.config.ts",
     "test:e2e:ui": "npx --no-install playwright test --config playwright.config.ts --ui",
-    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e"
+    "test:performance:load": "npx --no-install k6 run performance/load.js",
+    "test:performance:concurrency:booking": "npx --no-install k6 run performance/concurrency-student-booking.k6.js",
+    "test:performance:concurrency:approval": "npx --no-install k6 run performance/concurrency-po-approval.k6.js",
+    "test:performance:concurrency:jest": "npx --no-install jest --config jest.performance.config.js --testMatch='**/performance.concurrency.spec.ts'",
+    "test:performance:concurrency:all": "npm run test:performance:concurrency:jest && npm run test:performance:concurrency:booking && npm run test:performance:concurrency:approval",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e && npm run test:performance:concurrency:jest"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.4.0",
