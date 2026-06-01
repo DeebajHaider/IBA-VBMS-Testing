@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, BadRequestException, NotFoundException } from '@nestjs/common';
 import { BookingsService } from '../../iba-backend/src/bookings/bookings.service';
 
 // ── shared test data ────────────────────────────────────────────────────────
@@ -7,6 +7,8 @@ const ROOM_ID    = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const USER_ID    = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const OTHER_ID   = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 const BOOKING_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+const ADMIN_ID   = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+const PO_ID      = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 
 const VALID_DTO = {
   room_id : ROOM_ID,
@@ -143,6 +145,31 @@ describe('BookingsService', () => {
     });
   });
 
+  // ── UT-009 ─────────────────────────────────────────────────────────────────
+  describe('UT-009: cancel() — admin can cancel any booking', () => {
+    it('does not throw and fires the update when an admin cancels a booking they do not own', async () => {
+      // cancel() calls findOne() first → single() #1
+      // then calls updateStatus() internally → single() #2
+      // Queue both in execution order.
+      mockDb.single
+        .mockResolvedValueOnce({ data: PENDING_BOOKING, error: null })
+        .mockResolvedValueOnce({
+          data: { ...PENDING_BOOKING, status: 'rejected', reviewed_by: ADMIN_ID },
+          error: null,
+        });
+
+      // ADMIN_ID does not own the booking (USER_ID does) — ownership check must be skipped
+      const result = await service.cancel(BOOKING_ID, ADMIN_ID, 'admin');
+
+      // The update must have fired with 'rejected' and the admin's ID as reviewer.
+      // This is the proof that the method didn't bail out early.
+      expect(mockDb.update).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'rejected', reviewed_by: ADMIN_ID })
+      );
+      expect(result.status).toBe('rejected');
+    });
+  });
+
   // ── UT-010 ─────────────────────────────────────────────────────────────────
   describe('UT-010: cancel() — cannot cancel an already-rejected booking', () => {
     it('throws BadRequestException when booking status is already "rejected"', async () => {
@@ -162,6 +189,65 @@ describe('BookingsService', () => {
 
       await expect(service.cancel(BOOKING_ID, USER_ID, 'student'))
         .rejects.toThrow(/pending or approved/i);
+    });
+  });
+
+  // ── UT-014 ─────────────────────────────────────────────────────────────────
+  describe('UT-014: updateStatus() — happy path', () => {
+    it('writes both status and reviewed_by, and returns the updated booking', async () => {
+      // updateStatus() goes straight to update() — no findOne() first.
+      // Only one single() fires: the one at the end of the update chain.
+      const approvedRow = { ...PENDING_BOOKING, status: 'approved', reviewed_by: PO_ID };
+      mockDb.single.mockResolvedValueOnce({ data: approvedRow, error: null });
+
+      const result = await service.updateStatus(BOOKING_ID, 'approved', PO_ID);
+
+      // reviewed_by is the audit trail — asserting it specifically is the point of this test.
+      // If it ever stops being written, this assertion catches it.
+      expect(mockDb.update).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'approved', reviewed_by: PO_ID })
+      );
+      expect(result.status).toBe('approved');
+      expect((result as any).reviewed_by).toBe(PO_ID);
+    });
+
+    it('works identically for status: "rejected"', async () => {
+      // updateStatus() is status-agnostic — same code path for approve and reject.
+      // A second assertion with 'rejected' confirms the method is not hardcoded to 'approved'.
+      const rejectedRow = { ...PENDING_BOOKING, status: 'rejected', reviewed_by: PO_ID };
+      mockDb.single.mockResolvedValueOnce({ data: rejectedRow, error: null });
+
+      const result = await service.updateStatus(BOOKING_ID, 'rejected', PO_ID);
+
+      expect(mockDb.update).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'rejected', reviewed_by: PO_ID })
+      );
+      expect(result.status).toBe('rejected');
+    });
+  });
+
+  // ── UT-015 ─────────────────────────────────────────────────────────────────
+  describe('UT-015: updateStatus() — booking not found', () => {
+    it('throws NotFoundException when Supabase returns null data', async () => {
+      // The service guard is: if (error || !data) throw new NotFoundException(...)
+      // We test the !data branch — this is what a missing row looks like from Supabase.
+      mockDb.single.mockResolvedValueOnce({ data: null, error: null });
+
+      await expect(service.updateStatus(BOOKING_ID, 'approved', PO_ID))
+        .rejects.toThrow(NotFoundException);
+    });
+
+    it('still calls update before discovering the row is missing', async () => {
+      // Unlike cancel(), updateStatus() does NOT call findOne() first.
+      // It fires the update and then inspects the result.
+      // This means mockDb.update IS called even when the row doesn't exist.
+      // This test documents that behaviour explicitly.
+      mockDb.single.mockResolvedValueOnce({ data: null, error: null });
+
+      await expect(service.updateStatus(BOOKING_ID, 'approved', PO_ID))
+        .rejects.toThrow(NotFoundException);
+
+      expect(mockDb.update).toHaveBeenCalled();
     });
   });
 
