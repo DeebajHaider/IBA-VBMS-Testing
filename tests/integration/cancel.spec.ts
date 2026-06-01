@@ -51,7 +51,7 @@ describe('Cancellation API', () => {
   });
 
   // ── API-CANCEL-001 ───────────────────────────────────────────────────────
-  it('API-CANCEL-001: student cancels own pending booking — status becomes rejected (F-010)', async () => {
+  it('API-CANCEL-001: student cancels own pending booking → status becomes cancelled', async () => {
     const booking = await createBooking(studentToken);
 
     const res = await request(app.getHttpServer())
@@ -59,11 +59,11 @@ describe('Cancellation API', () => {
       .set('Authorization', `Bearer ${studentToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('rejected'); // F-010: cancel → 'rejected', not 'cancelled'
+    expect(res.body.status).toBe('cancelled'); // Asserts expected behavior per F-010 — will fail until fixed
   });
 
-  // ── API-CANCEL-002 ───────────────────────────────────────────────────────
-  it('API-CANCEL-002: student cancels approved booking — slot becomes re-bookable', async () => {
+  // ── API-CANCEL-002a ──────────────────────────────────────────────────────
+  it('API-CANCEL-002a: student cancels approved booking → status becomes cancelled', async () => {
     const booking = await createBooking(studentToken);
 
     const approveRes = await request(app.getHttpServer())
@@ -76,28 +76,38 @@ describe('Cancellation API', () => {
       .patch(`/api/bookings/${booking.id}/cancel`)
       .set('Authorization', `Bearer ${studentToken}`);
     expect(cancelRes.status).toBe(200);
-    expect(cancelRes.body.status).toBe('rejected');
+    expect(cancelRes.body.status).toBe('cancelled'); // Asserts expected behavior per F-010 — will fail until fixed
+  });
 
+  // ── API-CANCEL-002b ──────────────────────────────────────────────────────
+  it('API-CANCEL-002b: after student cancels approved booking → slot is re-bookable', async () => {
+    // Setup: create, approve, cancel
+    const booking = await createBooking(studentToken);
+
+    await request(app.getHttpServer())
+      .patch(`/api/bookings/${booking.id}/approve`)
+      .set('Authorization', `Bearer ${poToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/api/bookings/${booking.id}/cancel`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .expect(200);
+
+    // Assertion: the slot must now be available for a new booking
     const rebookRes = await request(app.getHttpServer())
       .post('/api/bookings')
       .set('Authorization', `Bearer ${studentToken}`)
       .send({ room_id: rooms[0].id, date: '2026-09-15', slot_id: 2, purpose: 'Re-book' });
 
-    // F-022: unique constraint on (room_id, date, slot_id) is not partial —
-    // it applies to ALL statuses including 'rejected'. A cancelled/rejected
-    // booking permanently occupies the slot at the DB level even though the
-    // application conflict check only filters status IN ('pending','approved').
-    // The INSERT hits a raw 23505 unique violation → unhandled 500.
-    // Expected per SRS: 201 (slot should be re-bookable after cancellation).
-    // Actual: 500. Re-booking after cancellation is broken by the schema constraint.
-    expect(rebookRes.status).toBe(500); // F-022
+    expect(rebookRes.status).toBe(201); // Asserts expected behavior per F-022 — will fail until schema constraint is fixed
   });
 
   // ── API-CANCEL-003 ───────────────────────────────────────────────────────
-  it('API-CANCEL-003: cancel after booking start time succeeds — timing not enforced (F-011)', async () => {
-    // Past-date booking works because of F-012 (no date-range validation).
-    // Slot 1 = 8:30 AM on 2020-01-01 — this start time is years in the past.
-    // Test plan says cancel should be blocked after start. Code has no such check.
+  it('API-CANCEL-003: cancel after booking start time → 403', async () => {
+    // Note: this test setup relies on F-012 (past dates currently accepted by the API).
+    // If F-012 is fixed before F-011, createBooking will throw and this test
+    // will fail at setup — that failure should be investigated in that context.
     const booking = await createBooking(studentToken, {
       date    : '2020-01-01',
       slot_id : 1,
@@ -107,17 +117,13 @@ describe('Cancellation API', () => {
       .patch(`/api/bookings/${booking.id}/cancel`)
       .set('Authorization', `Bearer ${studentToken}`);
 
-    // F-011: cancel() contains no timing logic. Returns 200 regardless of
-    // whether the booking's start time has already passed.
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('rejected');
+    expect(res.status).toBe(403); // Asserts expected behavior per F-011 — will fail until timing guard is implemented
   });
 
   // ── API-CANCEL-004 ───────────────────────────────────────────────────────
-  it('API-CANCEL-004: cancel before booking start time returns 200', async () => {
-    // Future booking — we are before the start time. Expected and actual: 200.
-    // Together with CANCEL-003, these confirm the code is entirely
-    // indifferent to timing in either direction.
+  it('API-CANCEL-004: cancel before booking start time → 200', async () => {
+    // Future booking — cancellation before start time must succeed.
+    // Together with CANCEL-003, these form the timing boundary pair.
     const booking = await createBooking(studentToken, { date: '2027-06-01' });
 
     const res = await request(app.getHttpServer())
@@ -129,10 +135,8 @@ describe('Cancellation API', () => {
 
   // ── API-CANCEL-AUTHZ ─────────────────────────────────────────────────────
   it('API-CANCEL-AUTHZ: student cannot cancel another student\'s booking → 403', async () => {
-    // Student A (12345) creates the booking
     const booking = await createBooking(studentToken);
 
-    // Student B (67890) tries to cancel it
     const res = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/cancel`)
       .set('Authorization', `Bearer ${studentBToken}`);
@@ -142,16 +146,16 @@ describe('Cancellation API', () => {
   });
 
   // ── API-CANCEL-STATE ─────────────────────────────────────────────────────
-  it('API-CANCEL-STATE: cannot cancel an already-rejected booking → 400', async () => {
+  it('API-CANCEL-STATE: cannot cancel an already-cancelled booking → 400', async () => {
     const booking = await createBooking(studentToken);
 
-    // First cancel — succeeds, status becomes 'rejected'
+    // First cancel — must succeed
     const firstCancel = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/cancel`)
       .set('Authorization', `Bearer ${studentToken}`);
     expect(firstCancel.status).toBe(200);
 
-    // Second cancel — status is now 'rejected', not in ['pending','approved']
+    // Second cancel — status is now 'cancelled', not in ['pending','approved']
     const secondCancel = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/cancel`)
       .set('Authorization', `Bearer ${studentToken}`);
@@ -160,34 +164,25 @@ describe('Cancellation API', () => {
     expect(secondCancel.body.message).toContain('pending or approved');
   });
 
-  // ── API-CANCEL-005 ─────────────────────────────────────────────────────────
-  it('API-CANCEL-005: PO cancels a student approved booking — slot re-bookable, F-018 confirmed', async () => {
-    // STEP 1: Student A creates a booking
+  // ── API-CANCEL-005a ──────────────────────────────────────────────────────
+  it('API-CANCEL-005a: PO cancels student approved booking → status becomes cancelled', async () => {
     const booking = await createBooking(studentToken);
     expect(booking.status).toBe('pending');
 
-    // STEP 2: PO approves it
     const approveRes = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/approve`)
       .set('Authorization', `Bearer ${poToken}`);
     expect(approveRes.status).toBe(200);
     expect(approveRes.body.status).toBe('approved');
 
-    // STEP 3: PO cancels it — using the same /cancel endpoint, with PO token
     const cancelRes = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/cancel`)
       .set('Authorization', `Bearer ${poToken}`);
 
     expect(cancelRes.status).toBe(200);
+    expect(cancelRes.body.status).toBe('cancelled'); // Asserts expected behavior per F-018 — will fail until fixed
 
-    // F-018: PO cancellation writes 'rejected', same as PO rejection.
-    // There is no way to distinguish a PO-cancelled booking from a
-    // PO-rejected one by status alone. Same root cause as F-010.
-    expect(cancelRes.body.status).toBe('rejected');
-
-    // DB readback: reviewed_by must be the PO's ID, not the student's.
-    // This confirms cancel() called updateStatus(id, 'rejected', requesterId)
-    // with the PO as the requester.
+    // DB readback: reviewed_by must be the PO's ID
     const supabase = getSupabaseClient();
     const { data: row } = await supabase
       .from('bookings')
@@ -196,8 +191,24 @@ describe('Cancellation API', () => {
       .single();
 
     expect(row.reviewed_by).toBe(poUser.id);
+  });
 
-    // STEP 4: Student B re-books the same slot — proves the slot was freed
+  // ── API-CANCEL-005b ──────────────────────────────────────────────────────
+  it('API-CANCEL-005b: after PO cancels student booking → slot is re-bookable by another student', async () => {
+    // Setup: create, approve, PO cancels
+    const booking = await createBooking(studentToken);
+
+    await request(app.getHttpServer())
+      .patch(`/api/bookings/${booking.id}/approve`)
+      .set('Authorization', `Bearer ${poToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .patch(`/api/bookings/${booking.id}/cancel`)
+      .set('Authorization', `Bearer ${poToken}`)
+      .expect(200);
+
+    // Assertion: Student B must be able to book the now-freed slot
     const rebookRes = await request(app.getHttpServer())
       .post('/api/bookings')
       .set('Authorization', `Bearer ${studentBToken}`)
@@ -208,27 +219,21 @@ describe('Cancellation API', () => {
         purpose : 'Student B re-booking after PO cancel',
       });
 
-    // F-022: same root cause as API-CANCEL-002.
-    // PO cancellation frees the slot at the application layer (status → 'rejected')
-    // but the DB unique constraint still holds the row, blocking re-insertion.
-    expect(rebookRes.status).toBe(500); // F-022
-    // Cannot assert 'pending' — the booking was never created
+    expect(rebookRes.status).toBe(201); // Asserts expected behavior per F-022 — will fail until schema constraint is fixed
   });
 
   // ── API-CANCEL-PO-AUTH ─────────────────────────────────────────────────────
   it('API-CANCEL-PO-AUTH: PO token can cancel any student booking', async () => {
-    // Student A creates a booking. PO is a completely different user — not the owner.
-    // A student trying to cancel someone else's booking gets 403 (API-CANCEL-AUTHZ).
-    // PO must NOT get 403 — the role bypass in cancel() must work end-to-end.
+    // Verifies the role bypass in cancel() — PO is not the booking owner
+    // but must not receive the 403 that a student-cancelling-another's-booking would get.
     const booking = await createBooking(studentToken);
 
     const res = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/cancel`)
       .set('Authorization', `Bearer ${poToken}`);
 
-    // 200 proves the role bypass fired — PO was not treated as a student
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('rejected');
+    expect(res.body.status).toBe('cancelled'); // Asserts expected behavior per F-010/F-018 — will fail until fixed
   });
 
-}); 
+});
