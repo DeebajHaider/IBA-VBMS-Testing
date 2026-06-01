@@ -109,20 +109,15 @@ describe('PO Booking Management API', () => {
 
   // ── API-PO-003 ─────────────────────────────────────────────────────────────
   it('API-PO-003: PO rejects a booking — status becomes rejected, slot re-bookable by another student', async () => {
-    // Student A books slot 2 on 2026-11-10
     const booking = await createBooking(studentToken);
-
-    // PO rejects it
+ 
     const rejectRes = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/reject`)
       .set('Authorization', `Bearer ${poToken}`);
-
+ 
     expect(rejectRes.status).toBe(200);
     expect(rejectRes.body.status).toBe('rejected');
-
-    // Student B now tries to book the exact same room+date+slot.
-    // The conflict check in create() filters on status IN ('pending','approved').
-    // A 'rejected' row does not block re-booking — this assertion proves that.
+ 
     const rebookRes = await request(app.getHttpServer())
       .post('/api/bookings')
       .set('Authorization', `Bearer ${studentBToken}`)
@@ -132,12 +127,8 @@ describe('PO Booking Management API', () => {
         slot_id : 2,
         purpose : 'Student B re-booking after rejection',
       });
-
-    // F-022: same root cause as API-CANCEL-002.
-    // PO cancellation frees the slot at the application layer (status → 'rejected')
-    // but the DB unique constraint still holds the row, blocking re-insertion.
-    expect(rebookRes.status).toBe(500); // F-022
-    // Cannot assert 'pending' — the booking was never created
+ 
+    expect(rebookRes.status).toBe(201); // Asserts expected behavior per F-022 — will fail until schema constraint is fixed
   });
 
   // ── API-PO-AUTH-001 ────────────────────────────────────────────────────────
@@ -185,129 +176,89 @@ describe('PO Booking Management API', () => {
   });
 
   // ── API-PO-STATE-001 ───────────────────────────────────────────────────────
-  it('API-PO-STATE-001: approve an already-rejected booking', async () => {
-    // SETUP: create a booking, then reject it
+  it('API-PO-STATE-001: approve an already-rejected booking → 400', async () => {
     const booking = await createBooking(studentToken);
-
+ 
     await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/reject`)
       .set('Authorization', `Bearer ${poToken}`);
-
-    // ACT: attempt to approve it now that it is 'rejected'
+ 
     const res = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/approve`)
       .set('Authorization', `Bearer ${poToken}`);
-
-    // The SRS implies illegal transitions should be blocked (a rejected booking
-    // should not be approvable), but the service does a blind UPDATE.
-    // This assertion is written to match reality — 200, not 400.
-    // The test passing is itself the finding.
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('approved'); // transition silently succeeded
+ 
+    expect(res.status).toBe(400); // Asserts expected behavior per F-020 — will fail until state-transition guard is implemented
   });
 
   // ── API-PO-STATE-002 ───────────────────────────────────────────────────────
-  it('API-PO-STATE-002: reject an already-approved booking', async () => {
-    // SETUP: create a booking, then approve it
+  it('API-PO-STATE-002: reject an already-approved booking → 400', async () => {
     const booking = await createBooking(studentToken);
-
+ 
     await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/approve`)
       .set('Authorization', `Bearer ${poToken}`);
-
-    // ACT: attempt to reject it now that it is 'approved'
+ 
     const res = await request(app.getHttpServer())
       .patch(`/api/bookings/${booking.id}/reject`)
       .set('Authorization', `Bearer ${poToken}`);
-
-    // F-020: same root cause as STATE-001.
-    // An approved booking should not be directly rejectable via /reject —
-    // the cancel endpoint exists for that purpose. But no guard prevents it.
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('rejected'); // transition silently succeeded
+ 
+    expect(res.status).toBe(400); // Asserts expected behavior per F-020 — will fail until state-transition guard is implemented
   });
 
-  // ── API-PO-004 ─────────────────────────────────────────────────────────────
-  it('API-PO-004: two pending bookings for the same slot', async () => {
-    // WHY DIRECT INSERT:
-    // The create() endpoint prevents two pending bookings for the same slot
-    // via a conflict check. TC-PO-004 describes approving one of two competing
-    // pending bookings — but this scenario is unreachable through the normal API.
-    // We use getSupabaseClient() to bypass the conflict check entirely.
-    const supabase = getSupabaseClient();
-
-    // We need the real user UUIDs — seedTestData() returns them.
-    // loginAs() only returns the token and the JWT payload, not the full DB row.
-    // So we fetch the users directly here.
-    const { data: users } = await supabase
-      .from('users')
-      .select('id, erp')
-      .in('erp', ['12345', '67890']);
-
-    const studentAId = users.find((u: any) => u.erp === '12345').id;
-    const studentBId = users.find((u: any) => u.erp === '67890').id;
-
-    // Attempt to insert two pending bookings for the exact same room+date+slot.
-    // The bookings table has a UNIQUE constraint on (room_id, date, slot_id).
-    // The first insert will succeed. The second will fail with a constraint violation.
-    const insertA = await supabase.from('bookings').insert({
-      user_id : studentAId,
-      room_id : rooms[0].id,
-      date    : '2026-12-01',
-      slot_id : 5,
-      purpose : 'TC-PO-004 Booking A',
-      status  : 'pending',
-    }).select().single();
-
-    const insertB = await supabase.from('bookings').insert({
-      user_id : studentBId,
-      room_id : rooms[0].id,
-      date    : '2026-12-01',
-      slot_id : 5,
-      purpose : 'TC-PO-004 Booking B',
-      status  : 'pending',
-    }).select().single();
-
-    // the unique constraint on (room_id, date, slot_id) prevents even a
-    // direct DB insert of two pending bookings for the same slot.
-    // TC-PO-004 describes a scenario that is impossible at the database level,
-    // not just at the API level. The test plan describes behaviour that requires
-    // a constraint change to even reproduce. Document and proceed.
-    if (insertB.error) {
-      // Expected path — constraint blocked the second insert.
-      // This is F-019: the test plan scenario is unreachable even via direct DB insert.
-      expect(insertB.error.code).toBe('23505'); // PostgreSQL unique violation code
-      console.warn(
-        'F-019: TC-PO-004 scenario is unreachable — DB unique constraint on ' +
-        '(room_id, date, slot_id) prevents two pending bookings for the same slot ' +
-        'even via direct insert. Test plan describes an impossible state.'
-      );
-      return; // Finding documented, test concludes
-    }
-
-    // If we somehow got here (constraint doesn't exist or was removed),
-    // test what happens when PO approves Booking A.
-    const bookingAId = insertA.data.id;
-    const bookingBId = insertB.data.id;
-
+ // ── API-PO-004 ─────────────────────────────────────────────────────────────
+  it('API-PO-004: two students can both have pending requests for the same slot — PO approves one', async () => {
+    // Per SRS §2.2 REQ-4 and §2.3 REQ-5, conflict prevention applies to
+    // *approved* bookings only. Multiple students may hold competing pending
+    // requests for the same slot simultaneously. The PO then picks one to
+    // approve; the others should be auto-rejected (F-016 — not yet implemented).
+ 
+    // Student A books slot 5 on 2026-12-01
+    const bookingA = await request(app.getHttpServer())
+      .post('/api/bookings')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({
+        room_id : rooms[0].id,
+        date    : '2026-12-01',
+        slot_id : 5,
+        purpose : 'TC-PO-004 Booking A',
+      });
+    expect(bookingA.status).toBe(201);
+ 
+    // Student B books the same slot — must also succeed because no approved
+    // booking exists yet. The current API incorrectly returns 409 here.
+    const bookingB = await request(app.getHttpServer())
+      .post('/api/bookings')
+      .set('Authorization', `Bearer ${studentBToken}`)
+      .send({
+        room_id : rooms[0].id,
+        date    : '2026-12-01',
+        slot_id : 5,
+        purpose : 'TC-PO-004 Booking B',
+      });
+    expect(bookingB.status).toBe(201); // Asserts expected behavior per F-016 — will fail until conflict check is scoped to approved-only
+ 
+    // PO approves Student A's booking
     const approveRes = await request(app.getHttpServer())
-      .patch(`/api/bookings/${bookingAId}/approve`)
+      .patch(`/api/bookings/${bookingA.body.id}/approve`)
       .set('Authorization', `Bearer ${poToken}`);
-
     expect(approveRes.status).toBe(200);
     expect(approveRes.body.status).toBe('approved');
-
-    // Check whether Booking B was auto-handled
-    const { data: bookingB } = await supabase
+ 
+    // F-016: after approving A, the service should auto-reject all other
+    // pending bookings for the same slot. No such logic exists yet —
+    // B's booking will remain 'pending' indefinitely.
+    // This is documented as a finding, not asserted as a test failure,
+    // because we cannot reach this step until the conflict check above is fixed.
+    const supabase = getSupabaseClient();
+    const { data: rowB } = await supabase
       .from('bookings')
       .select('status')
-      .eq('id', bookingBId)
+      .eq('id', bookingB.body.id)
       .single();
-
-    // F-016 would apply here: no auto-rejection of Booking B.
-    // If execution reaches this point, document whatever status Booking B has.
-    console.warn(`Booking B status after A approved: ${bookingB.status}`);
-    expect(bookingB.status).toBe('pending'); // service has no auto-rejection logic
+ 
+    // Note: once the conflict check is fixed and this step is reachable,
+    // this assertion should be changed to 'rejected' to expose F-016.
+    expect(rowB.status).toBe('pending');
   });
 
 });
