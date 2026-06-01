@@ -222,23 +222,19 @@ describe('Booking Creation API', () => {
     expect(res.status).toBe(400);
   });
 
-  // ── API-BOOK-DATE-002 ─────────────────────────────────────────────────────
-  it('API-BOOK-DATE-002: past date is accepted', async () => {
-    // SRS says past dates should be rejected.
-    // @IsDateString() only validates format, not value — '2020-01-01' is valid ISO.
-    // No date-range check exists anywhere in the service or DTO.
-    // Expected per SRS: 400. Actual: 201 — the booking is created.
-    // Assertion written to match reality; the 201 itself is the finding.
+ // ── API-BOOK-DATE-002 ─────────────────────────────────────────────────────
+  it('API-BOOK-DATE-002: past date booking → 400', async () => {
+    // SRS §2.2 REQ-3: bookings must be for a date in the current year,
+    // and REQ-4 implies only valid future slots are bookable.
+    // A past date must be rejected before any DB write occurs.
     const res = await request(app.getHttpServer())
       .post('/api/bookings')
       .set('Authorization', `Bearer ${studentToken}`)
       .send({ room_id: rooms[0].id, date: '2020-01-01', slot_id: 2, purpose: 'backdated booking' });
-
-    // F-012: past dates are not rejected. System accepts bookings for any valid
-    // ISO date string regardless of whether it has already passed.
-    expect(res.status).toBe(201);
-    expect(res.body.status).toBe('pending');
-    expect(res.body.date).toBe('2020-01-01');
+ 
+    // Asserts expected behavior per F-012 — will fail until a future-date
+    // validator is added to CreateBookingDto or BookingsService.
+    expect(res.status).toBe(400);
   });
 
 });
