@@ -223,7 +223,7 @@ describe('Booking Creation API', () => {
   });
 
   // ── API-BOOK-DATE-002 ─────────────────────────────────────────────────────
-  it('API-BOOK-DATE-002: past date is accepted — F-012 confirmed', async () => {
+  it('API-BOOK-DATE-002: past date is accepted', async () => {
     // SRS says past dates should be rejected.
     // @IsDateString() only validates format, not value — '2020-01-01' is valid ISO.
     // No date-range check exists anywhere in the service or DTO.
